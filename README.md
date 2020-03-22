@@ -10,7 +10,7 @@ sudo chmod u+x {simulator_file_name}
 ```
 
 ### Goals
-In this project your goal is to safely navigate around a virtual highway with other traffic that is driving +-10 MPH of the 50 MPH speed limit. You will be provided the car's localization and sensor fusion data, there is also a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too. The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another. The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop. Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
+In this project the goal is to safely navigate around a virtual highway with other traffic that is driving +-10 MPH of the 50 MPH speed limit. One is provided the car's localization and sensor fusion data, there is also a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too. The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another. The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop. Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
 
 #### The map of the highway is in data/highway_map.txt
 Each waypoint in the list contains  [x,y,s,dx,dy] values. x and y are the waypoint's map coordinate position, the s value is the distance along the road to get to that waypoint in meters, the dx and dy values define the unit normal vector pointing outward of the highway loop.
@@ -65,7 +65,7 @@ the path has processed since last time.
 
 2. There will be some latency between the simulator running and the path planner returning a path, with optimized code usually its not very long maybe just 1-3 time steps. During this delay the simulator will continue using points that it was last given, because of this its a good idea to store the last points you have used so you can have a smooth transition. previous_path_x, and previous_path_y can be helpful for this transition since they show the last points given to the simulator controller with the processed points already removed. You would either return a path that extends this previous path or make sure to create a new path that has a smooth transition with this last path.
 
-## Tips
+## External code
 
 A really helpful resource for doing this project and creating smooth trajectories was using http://kluge.in-chemnitz.de/opensource/spline/, the spline function is in a single hearder file is really easy to use.
 
@@ -140,6 +140,36 @@ that's just a guess.
 One last note here: regardless of the IDE used, every submitted project must
 still be compilable with cmake and make./
 
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
+---
 
+# Model Documentation
+
+## Behavior Planner
+
+The behavior planner has the following lane actions to choose from:
+
+ - "KL": Keep Lane
+ - "LCL": Change Lane Left
+ - "LCR": Change Lane Right
+ - "DLCL": Double Lane Change Left
+ - "DLCR": Double Lane Change Right
+
+Each of these actions is paired with a set of possible target velocities {10, 11, 12, 13, 14, 15, 16, 17, 18, 19} m/s. This yields a maximum action space size of 50.
+
+Every time the number of remaining waypoints falls below 30, the behavior planner is executed. The planner then figures out, which of the 50 actions are possible. A "LCL" whilst driving on the left-most lane would not be allowed for instance. It then generates trajectories for each of the possible lane actions, combined with each target speed.
+
+The trajectories are generated as Jerk Minimizing Trajectories (JMT) with a fixed execution time T, which is chosen depending on the type of maneuver. Staying in a lane with only minor or no velocity changes can be executed over a small time T, without generating accelerations and jerks in excess of the provided bounds. On the other hand a lane change or even a double lane change, or a large change in velocity is executed over a larger time span. Jerk Minimizing Trajectories for given initial and target boundary conditions (position, speed, acceleration) for both Frenet s and d coordinates of the car, are generated by fitting a polynomial of degree 5 to these boundary conditions. The target boundary conditions are provided by the planner depending on the action, for instance a "LCL" would have a target Frenet d of (d_curr - 4.0).
+
+Each trajectory is then assigned a cost, which is a weighted sum of 5 cost functions:
+
+1. Efficiency Cost: Reward the largest average velocity along the trajectory.
+2. Inlane Safety Cost: Yields a larger cost the closer the trajectory brings our car to the rear of another car.
+3. Lane Change Safety Cost: If the trajectory involves a lane change, this cost function checks for vehicles in the target lane and yields a large cost if the lane is occupied by another car. This is done by predicting where all cars in the target lane will be at the end of the trajectory execution and yielding a large cost if our target position with a safety margin overlaps with another cars position.
+4. Double Lane Change Safety Cost: If the trajectory involves a double lane change, the middle lane, which is crossed, is checked for vehicles. If a vehicle in the middle lane is predicted to be at the crossing point with some margin, a large cost is returned.
+5. Lane Change Cost: A small penalty of changing lanes, to penalize unnecessary lane changes, e.g. lane changes that are made way too early.
+
+Cost functions 1 and 2 combined make a lane change favorable, when there is a slow car in our car's lane. Cost functions 3 and 4 make sure, that a lane change is safe to execute.
+
+The trajectory with lowest cost is then converted from Frenet s,d to Cartesian x,y coordinates, appended to the still unprocessed waypoints and passed to the simulator. The convertion to Cartesian coordinates is done by fitting two sets of cubic splines f(s) and g(s) to the map data, f(s) fitting the map x-values and g(s) fitting the map y-values over the map s-values. The d-value is then introduced by determining the slope of the spline at the desired s-value by finite differencing and adding the d-value orthogonally to the slope direction.
+
+The planner has been tested in the simulation for 20 miles without incident.
